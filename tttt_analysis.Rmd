@@ -1,0 +1,249 @@
+---
+title: "Analysis Take Time To Think"
+author: "Philip W. S. Newall, Leonardo Weiss-Cohen, Henrik Singmann, Ty Hayes, Elliot A. Ludvig, & Lukasz Walasek"
+date: "Analysis by Henrik Singmann; Script run on `r format(Sys.time(), '%d. %B %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+### run with R 4.0.2
+# library("checkpoint")
+# checkpoint("2020-07-01")
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(dpi=200, out.width="70%", fig.asp = 0.618,
+                      fig.width=4, fig.align = "center")
+options(width = 110)
+options("dplyr.summarise.inform" = FALSE)
+options(pillar.sigfig = 3)
+options(mc.cores = parallel::detectCores()) # fitting uses multicore by default
+```
+
+# Preparation
+
+```{r, message=FALSE, warning=FALSE, results='hide'}
+library("tidyverse")
+library("tidylog")
+theme_set(theme_bw() + 
+            theme(panel.grid.major.x = element_blank(), 
+                  panel.grid.minor.x = element_blank()))
+library("brms")  # requires compilation tools for model fitting
+library("tidybayes")
+#library("BayesFactor")
+library("binom")
+cond_labels <- c("No Message", "Message 1", "Message 2")
+ylabel <- "Gambling message"
+```
+
+## Descriptive and Demographic Information
+
+```{r, message=FALSE}
+
+```
+
+```{r, message=FALSE}
+dpar <- read_csv("data/ProlificID_2022-04-08.csv") %>% 
+  mutate(
+    ppt_id = factor(ppt_id),
+    expt_cond = factor(expt_cond, levels = c(0, 1, 2), labels = cond_labels)
+  ) %>% 
+  mutate(
+    bonus = as.numeric(substr(bonus, 2, 100)),
+    age = suppressWarnings(as.numeric(age))
+  )
+
+##### Data Preparation 
+## step 1: exclude data sets that need to be excluded (see .txt file in data folder)
+dpar <- dpar %>% 
+  filter(as.numeric(as.character(ppt_id)) > 3) %>% ## remove test data
+  filter(!(ppt_id %in% c("2287", "2309"))) ## remove double participant
+
+total_n_datasets <- nrow(dpar)
+
+## step 2: only retain participants that finished experiment
+dpar <- dpar %>% 
+  filter(progress == "ProlificCompletion")
+
+## step 3: retain participants that passed the captchas
+dpar_use <- dpar %>% 
+  filter(correct_captchas >= 2) %>% 
+  droplevels()
+
+ids_use <- dpar_use$ppt_id
+```
+
+In total we have data from `r total_n_datasets` participants. Of those `r nrow(dpar)` participants finished the experiment or failed at the captcha stage (i.e., did not abandon the study throughout). Of those, `r nrow(dpar_use)` solved two or more captchas and proceeded to the roulette part. All following analyses are based on these `r nrow(dpar_use)` participants.
+
+The distribution of conditions is as follows (prop = proportion):
+
+```{r}
+dpar_use %>% 
+  group_by(expt_cond) %>% 
+  summarise(n = n()) %>% 
+  mutate(prop = n/sum(n))
+```
+
+```{r, message=FALSE}
+## step 4: add information whether they have roulette experience
+dryn <- read_csv("data/Roulette YN.csv") %>% 
+  mutate(ppt_id = factor(ppt_id)) %>% 
+  mutate(Roulette = factor(Roulette, levels = c("Yes", "No"))) %>% 
+  rename(roulette = Roulette)
+dpar_use <- dpar_use %>% 
+  left_join(dryn)
+
+duse <- dpar_use %>% 
+  select(ppt_id, expt_cond, gamcare_click, bonus, bet_count, roulette)
+```
+
+Participants with and without experience in online roulette:
+```{r}
+dpar_use %>% 
+  count(roulette) %>% 
+  mutate(prop = n/sum(n))
+```
+
+Some demographic information:
+
+```{r}
+dpar_use %>% 
+  count(gender) %>% 
+  mutate(prop = n/sum(n))
+
+dpar_use %>% 
+  select(age, bonus, bet_count) %>% 
+  psych::describe()
+```
+
+Some conditional demographic information:
+
+```{r}
+dpar_use %>% 
+  count(gender, expt_cond) %>% 
+  mutate(prop = n/sum(n))
+
+dpar_use %>% 
+  select(expt_cond, age, bonus, bet_count) %>% 
+  psych::describeBy(group = "expt_cond")
+```
+
+```{r, include=FALSE}
+covariates <- read_csv("data/post_questionnaire_2022-04-08.csv") %>% 
+  mutate(across(-ppt_id, ~case_when(
+    . == "Never" ~ 0,
+    . == "Sometimes" ~ 1,
+    . == "Most of the time" ~ 2, 
+    . == "Almost always" ~ 3, 
+    TRUE ~ NA_real_))) %>% 
+  mutate(ppt_id = factor(ppt_id)) %>% 
+  filter(ppt_id %in% ids_use)
+pgsi <- covariates %>% 
+  #select(-starts_with("Motives")) %>% 
+  pivot_longer(-ppt_id) %>% 
+  group_by(ppt_id) %>% 
+  summarise(pgsi = sum(value))
+
+stopifnot(all(!is.na(pgsi$pgsi)))
+
+duse <- left_join(duse, pgsi) %>% 
+  mutate(pgsi_c = pgsi - mean(pgsi))
+```
+
+Now let's take a look at the PGSI scores:
+
+```{r}
+duse %>% 
+  summarise(across(pgsi, .fns = c(mean = mean, sd = sd)))
+duse %>% 
+  group_by(expt_cond) %>% 
+  summarise(across(pgsi, .fns = c(mean = mean, sd = sd)))
+```
+
+
+Next let's take a look at our main DV, proportion of money bet, which is defined as follows:
+$$\texttt{prop_bet} = \frac{\texttt{amount}}{5 + \texttt{total_win}}$$
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+bets <- read_csv("data/roulette_2022-04-08.csv") %>% 
+  mutate(ppt_id = factor(ppt_id)) %>% 
+  mutate(across(.cols = c(old_bonus, total_stake, winnings, new_bonus), 
+                .fns = ~as.numeric(substr(., 2, 100))))
+bets2 <- bets %>% 
+  group_by(ppt_id) %>%
+  mutate(final_bonus = new_bonus[bet_no == max(bet_no)]) %>% 
+  summarise(amount = sum(abs(total_stake)), 
+            total_win = sum(winnings), 
+            bet_count_2 = n(), 
+            final_bonus = final_bonus[1]) 
+
+duse <- left_join(duse, bets2) %>% 
+  mutate(
+    amount = if_else(is.na(amount), 0, amount),
+    total_win = if_else(is.na(total_win), 0, total_win),
+    bet_count_2 = if_else(is.na(bet_count_2), 0L, bet_count_2),
+    final_bonus = if_else(is.na(final_bonus), 5, final_bonus)
+  ) %>% 
+  mutate(prop_bet = amount / (5 + total_win)) %>% 
+  mutate(prop_bet = if_else(prop_bet > 1, 1, prop_bet)) ## necessary: few values are just above 1 (but shown as 1)
+
+stopifnot(all(duse$bet_count_2 == duse$bet_count))
+duse <- duse %>% 
+  select(-bet_count_2)
+
+stopifnot(all(duse$bonus == duse$final_bonus))
+duse <- duse %>% 
+  select(-final_bonus)
+
+```
+
+
+
+```{r}
+duse %>% 
+  group_by(expt_cond) %>% 
+  summarise(across(prop_bet, .fns = c(mean = mean, sd = sd)))
+```
+
+# Distribution of DV
+
+Our DV clearly does not look normally distributed.
+
+```{r}
+duse %>% 
+  ggplot(aes(x = prop_bet, y = after_stat(density * width))) +
+  geom_histogram(binwidth = 0.025) +
+  labs(y = "proportion")
+```
+
+```{r}
+duse %>% 
+  summarise(gamble_at_all = 1 - mean(prop_bet  == 0), 
+            gamble_everything = mean(prop_bet[prop_bet != 0] == 1),
+            proportion_bet_rest = mean(prop_bet[!(prop_bet %in% c(0, 1))]))
+
+duse %>% 
+  summarise(no_gamble = sum(prop_bet  == 0),
+            gamble_at_all = sum(prop_bet  != 0), 
+            gamble_everything = sum(prop_bet[prop_bet != 0] == 1))
+
+
+```
+
+Binomial confidence or credibility intervals for the probability to gamble at all:
+
+```{r}
+binom.confint(nrow(duse) - sum(duse$prop_bet == 0), nrow(duse))
+```
+
+Distribution per condition:
+
+```{r}
+duse %>% 
+  ggplot(aes(x = prop_bet, y = after_stat(density * width))) +
+  geom_histogram(binwidth = 0.025) +
+  facet_wrap(vars(expt_cond)) +
+  labs(y = "proportion") 
+```
+

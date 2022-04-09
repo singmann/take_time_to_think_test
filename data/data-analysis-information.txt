@@ -1,0 +1,25 @@
+ppt_id 1, 2, 3 are not real data but testing data run by the researcher team themselves
+all other participants appearing in ProlificID___.csv are genuine participants
+
+- due to experimenter error, one participant did the study twice, ids 2287 and 2309
+
+# ProlificID___.csv
+- finishing the full experiment is indicated if the progress variable is equal to ProlificCompletion
+- participants screened out at captcha stage: correct_captchas < 2
+- expt_cond = 0 is control condition. 1 and 2 are the two treatment conditions.
+
+
+# post-questionnaire:
+- never = 0, sometimes = 1, most of the time = 2, almost always = 3
+
+# roulette data
+- id: can be ignored
+- play duration: betting time (excluding spin time, one of the DVs)
+- last column: array of payoffs by number
+
+# RouletteYN
+- We collected the data in two waves, the last day I opened up for non-roulette players. However, a few of the participants in that last day was also a roulette player, so date is not a perfect identifier. this file connects their ppt_ids to roulette player Y/N as a binary variable, according to Prolific.
+- This table is much shorter because it only has the participants who submitted the task in Prolific, those who returned it or timed-out are not included. For example, everyone who failed the browser test because they were on a mobile phone.
+
+
+
