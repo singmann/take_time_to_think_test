@@ -9,8 +9,8 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-# library("checkpoint")
-# checkpoint("2022-04-10")
+library("checkpoint")
+checkpoint("2022-04-10")
 knitr::opts_chunk$set(echo = FALSE)
 knitr::opts_chunk$set(dpi=200, out.width="70%", fig.asp = 0.618,
                       fig.width=4, fig.align = "center")
