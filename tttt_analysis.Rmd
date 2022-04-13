@@ -43,8 +43,10 @@ library("tidybayes")
 #library("BayesFactor")
 library("emmeans")
 library("binom")
-cond_labels <- c("No Message", "Message 1", "Message 2")
+cond_labels <- c("No Message", "Banner", "Popup & Banner")
 ylabel <- "Gambling message"
+ERROR_WIDTH <- 0.95 ## default: c(0.66, 0.95)
+COMPARISON_EXCLUDE <- paste(cond_labels[3], "-", cond_labels[2])
 ```
 
 ## Descriptive and Demographic Information
@@ -376,7 +378,7 @@ plot(mzoib, variable = "Intercept", regex = TRUE)
 ```
 
 
-```{r, include=FALSE}
+```{r, include=FALSE, eval = FALSE}
 get_variables(mzoib)
 ```
 
@@ -451,8 +453,8 @@ draws_zoib <- get_prop_bet_draws(mzoib)
 
 draws_zoib_diff <- draws_zoib %>% 
   compare_levels(prop_bet, by = expt_cond) %>% 
-  filter(expt_cond != "Message 2 - Message 1") %>% 
-  mutate(comparison_with = paste("Message", str_extract(expt_cond, "\\d")))
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No Message"))
 
 ```
 
@@ -495,7 +497,7 @@ draws_zoib2 %>%
 pr1 <- draws_zoib %>% 
   ggplot(aes(x = prop_bet, y = expt_cond)) +
   #stat_histintervalh(breaks = 40) +
-  stat_halfeye() +
+  stat_halfeye(.width = ERROR_WIDTH) +
   xlab("Proportion Bet") + ylab(ylabel) +
   scale_x_continuous(labels = scales::percent_format(1))
 
@@ -503,7 +505,7 @@ pr2 <- draws_zoib_diff %>%
   ggplot(aes(x = prop_bet, y = comparison_with)) +
   #stat_histintervalh(breaks = 40) +
   geom_vline(xintercept = 0, colour = "darkgrey") +
-  stat_halfeye() +
+  stat_halfeye(.width = ERROR_WIDTH) +
   xlab("Difference in Proportion Bet") + ylab("No message vs.") +
   scale_x_continuous(labels = scales::percent_format(0.1), 
                      breaks = seq(-0.1, 0.05, by = 0.025))
@@ -586,8 +588,8 @@ draws_zoib2 <- get_prop_bet_draws(mzoib2)
 
 draws_zoib2_diff <- draws_zoib2 %>% 
   compare_levels(prop_bet, by = expt_cond) %>% 
-  filter(expt_cond != "Message 2 - Message 1") %>% 
-  mutate(comparison_with = paste("Message", str_extract(expt_cond, "\\d")))
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No Message"))
 
 draws_zoib2_diff %>% 
   mean_qi(prop_bet) 
@@ -598,7 +600,7 @@ draws_zoib2_diff %>%
 ph1_c1 <- draws_zoib2 %>% 
   ggplot(aes(x = prop_bet, y = expt_cond)) +
   #stat_histintervalh(breaks = 40) +
-  stat_halfeye() +
+  stat_halfeye(.width = ERROR_WIDTH) +
   xlab("Proportion Bet") + ylab(ylabel) +
   scale_x_continuous(labels = scales::percent_format(1))
 
@@ -606,7 +608,7 @@ ph1_diff_c1 <- draws_zoib2_diff %>%
   ggplot(aes(x = prop_bet, y = comparison_with)) +
   #stat_histintervalh(breaks = 40) +
   geom_vline(xintercept = 0, colour = "darkgrey") +
-  stat_halfeye() +
+  stat_halfeye(.width = ERROR_WIDTH) +
   xlab("Difference in Proportion Bet") + ylab("No message vs.") +
   scale_x_continuous(labels = scales::percent_format(0.1), 
                      breaks = seq(-0.1, 0.05, by = 0.025))
@@ -654,8 +656,8 @@ draws_zoib3 <- get_prop_bet_draws(mzoib3)
 
 draws_zoib3_diff <- draws_zoib3 %>% 
   compare_levels(prop_bet, by = expt_cond) %>% 
-  filter(expt_cond != "Message 2 - Message 1") %>% 
-  mutate(comparison_with = paste("Message", str_extract(expt_cond, "\\d")))
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No Message"))
 ```
 
 ```{r}
@@ -668,7 +670,7 @@ draws_zoib3_diff %>%
 ph1_c2 <- draws_zoib3 %>% 
   ggplot(aes(x = prop_bet, y = expt_cond)) +
   #stat_histintervalh(breaks = 40) +
-  stat_halfeye() +
+  stat_halfeye(.width = ERROR_WIDTH) +
   xlab("Proportion Bet") + ylab(ylabel) +
   scale_x_continuous(labels = scales::percent_format(1))
 
@@ -676,7 +678,7 @@ ph1_diff_c2 <- draws_zoib3_diff %>%
   ggplot(aes(x = prop_bet, y = comparison_with)) +
   #stat_histintervalh(breaks = 40) +
   geom_vline(xintercept = 0, colour = "darkgrey") +
-  stat_halfeye() +
+  stat_halfeye(.width = ERROR_WIDTH) +
   xlab("Difference in Proportion Bet") + ylab("No message vs.") +
   scale_x_continuous(labels = scales::percent_format(0.1), 
                      breaks = seq(-0.1, 0.05, by = 0.025))
@@ -732,8 +734,8 @@ draws_h2 <- emmeans(mh2, "expt_cond", type = "response") %>%
   mutate(prob = plogis(.value))
 draws_h2_diff <- draws_h2 %>% 
   compare_levels(prob, by = expt_cond) %>% 
-  filter(expt_cond != "Message 2 - Message 1") %>% 
-  mutate(comparison_with = paste("Message", str_extract(expt_cond, "\\d")))
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No Message"))
 draws_h2_diff %>% 
   mean_qi(prob) 
 
@@ -746,14 +748,14 @@ Now the results figure:
 ph2 <- draws_h2 %>% 
   ggplot(aes(x = prob, y = expt_cond)) +
   #stat_histintervalh(breaks = 40) +
-  stat_halfeye() +
+  stat_halfeye(.width = ERROR_WIDTH) +
   xlab("Probability of GamCare Click") + ylab(ylabel) +
   scale_x_continuous(labels = scales::percent_format(1))
 ph2_diff <- draws_h2_diff %>% 
   ggplot(aes(x = prob, y = comparison_with)) +
   #stat_histintervalh(breaks = 40) +
   geom_vline(xintercept = 0, colour = "darkgrey") +
-  stat_halfeye() +
+  stat_halfeye(.width = ERROR_WIDTH) +
   xlab("Difference in Probability") + ylab("No message vs.") +
   scale_x_continuous(labels = scales::percent_format(0.1))
 
@@ -892,8 +894,8 @@ draws_slognorm <- left_join(draws_times_m, draws_times_s) %>%
   mutate(mean = exp(m + sigma^2/2))
 draws_times_diff <- draws_slognorm %>% 
   compare_levels(mean, by = expt_cond) %>% 
-  filter(expt_cond != "Message 2 - Message 1") %>% 
-  mutate(comparison_with = paste("Message", str_extract(expt_cond, "\\d")))
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No Message"))
 
 ```
 
@@ -920,13 +922,13 @@ Now the results figure:
 ph3a <- draws_slognorm %>% 
   ggplot(aes(x = mean, y = expt_cond)) +
   #stat_histintervalh(breaks = 40) +
-  stat_halfeye() +
+  stat_halfeye(.width = ERROR_WIDTH) +
   xlab("Mean Betting Time (s)") + ylab(ylabel)
 ph3a_diff <- draws_times_diff %>% 
   ggplot(aes(x = mean, y = comparison_with)) +
   #stat_histintervalh(breaks = 40) +
   geom_vline(xintercept = 0, colour = "darkgrey") +
-  stat_halfeye() +
+  stat_halfeye(.width = ERROR_WIDTH) +
   xlab("Difference in Betting Time") + ylab("No message vs.") 
 
 cowplot::plot_grid(ph3a, ph3a_diff)
@@ -1006,8 +1008,8 @@ draws_number_diff <- mnb1 %>%
   gather_emmeans_draws() %>% 
   mutate(mean = exp(.value)) %>% 
   compare_levels(mean, expt_cond) %>% 
-  filter(expt_cond != "Message 2 - Message 1") %>% 
-  mutate(comparison_with = paste("Message", str_extract(expt_cond, "\\d")))
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No Message"))
 draws_number_diff %>% 
   median_qi(mean)
 ```
@@ -1023,12 +1025,12 @@ pspin1 <- mnb1 %>%
   ungroup %>% 
   mutate(exp_cond = factor(expt_cond, labels = cond_labels)) %>% 
   ggplot(aes(y = expt_cond, x = mean)) +
-  stat_halfeye() +
+  stat_halfeye(.width = ERROR_WIDTH) +
   ylab(ylabel) + xlab("Predicted mean number of spins")
 pspin2 <- draws_number_diff %>% 
   ggplot(aes(x = mean, y = comparison_with)) +
   geom_vline(xintercept = 0, color = "grey", size = 0.6) +
-  stat_halfeye() +
+  stat_halfeye(.width = ERROR_WIDTH) +
   labs(x = "Difference in mean number of spins") + ylab("No message vs.") 
 cowplot::plot_grid(pspin1, pspin2)
 ```

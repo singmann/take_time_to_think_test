@@ -23,3 +23,7 @@ all other participants appearing in ProlificID___.csv are genuine participants
 
 
 
+## Unblinding of conditions:
+0 - Control
+1 - Banner
+2 - Pop Up
