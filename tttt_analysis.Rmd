@@ -172,6 +172,40 @@ duse %>%
   summarise(across(pgsi, .fns = c(mean = mean, sd = sd)))
 ```
 
+Of the total of `r nrow(duse)` participants, `r sum(duse$bet_count == 0)` participants did not bet at all. We can take a look at the bonus as a function of whether or not participant bet:
+
+```{r}
+duse %>% 
+  mutate(bet_at_all = bet_count != 0) %>% 
+  group_by(bet_at_all) %>% 
+  summarise(
+    mean = mean(bonus),
+    median = median(bonus),
+    sd = sd(bonus),
+    n = n(),
+    min = min(bonus),
+    max = max(bonus)
+  )
+```
+
+```{r, message=FALSE}
+duse %>% 
+  mutate(bet_at_all = bet_count != 0) %>% 
+  group_by(expt_cond, bet_at_all) %>% 
+  summarise(
+    mean = mean(bonus),
+    median = median(bonus),
+    sd = sd(bonus),
+    n = n(),
+    min = min(bonus),
+    max = max(bonus)
+  )
+```
+
+Note, the expected loss when betting in our roulette task is 1/37, so participants are expected to retain 36/37 when betting:
+
+$$£5 \times \frac{36}{37} \approx £4.86$$
+
 
 Next let's take a look at our main DV, proportion of money bet, which is defined as follows:
 $$\texttt{prop_bet} = \frac{\texttt{amount}}{5 + \texttt{total_win}}$$
