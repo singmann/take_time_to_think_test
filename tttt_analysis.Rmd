@@ -1006,7 +1006,7 @@ Then let's take a look at the predicted number of spins. To do so it is importan
 
 However, we can derive the mean of the truncated distribution from first principles. More specifically, for any random variable $X$ truncated such that $X > y$ and with density function of the non-truncated distribution $f(x)$ and corresponding cumulative density function $F(x)$ its expectation $E(X|X > y)$ (or mean) is given by (see e.g., [Wikipedia](https://en.wikipedia.org/wiki/Truncated_distribution))
 $$
-E(X|X > y) = \frac{\int_y^\infty x g(x) dx}{1 - F(y)}.
+E(X|X > y) = \frac{\int_y^\infty x f(x) dx}{1 - F(y)}.
 $$
 In words this formula says that the the expectation of the truncated random variable is given by the expectation derived for the truncated part of the non-truncated random variable (the numerator) divided by the probability of the truncated part.
 
