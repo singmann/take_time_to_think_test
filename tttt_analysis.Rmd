@@ -43,7 +43,7 @@ library("tidybayes")
 #library("BayesFactor")
 library("emmeans")
 library("binom")
-cond_labels <- c("No Message", "Banner", "Popup & Banner")
+cond_labels <- c("No-Message", "Message", "Message+")
 ylabel <- "Gambling message"
 ERROR_WIDTH <- 0.95 ## default: c(0.66, 0.95)
 COMPARISON_EXCLUDE <- paste(cond_labels[3], "-", cond_labels[2])
@@ -86,7 +86,7 @@ dpar_use <- dpar %>%
 ids_use <- dpar_use$ppt_id
 ```
 
-In total we have data from `r total_n_datasets` participants. Of those `r nrow(dpar)` participants finished the experiment or failed at the captcha stage (i.e., did not abandon the study throughout). Of those, `r nrow(dpar_use)` solved two or more captchas and proceeded to the roulette part. All following analyses are based on these `r nrow(dpar_use)` participants.
+In total we have data from `r total_n_datasets + 2` participants. Of those `r nrow(dpar)` participants finished the experiment or failed at the captcha stage (i.e., did not abandon the study throughout). Of those, `r nrow(dpar_use)` solved two or more captchas and proceeded to the roulette part. All following analyses are based on these `r nrow(dpar_use)` participants.
 
 The distribution of conditions is as follows (prop = proportion):
 
@@ -450,11 +450,12 @@ get_prop_bet_draws <- function(model) {
 
 ```{r, include=FALSE}
 draws_zoib <- get_prop_bet_draws(mzoib)
+levels(draws_zoib$expt_cond) <- cond_labels
 
 draws_zoib_diff <- draws_zoib %>% 
   compare_levels(prop_bet, by = expt_cond) %>% 
   filter(expt_cond != COMPARISON_EXCLUDE) %>% 
-  mutate(comparison_with = str_remove(expt_cond, " - No Message"))
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
 
 ```
 
@@ -506,7 +507,7 @@ pr2 <- draws_zoib_diff %>%
   #stat_histintervalh(breaks = 40) +
   geom_vline(xintercept = 0, colour = "darkgrey") +
   stat_halfeye(.width = ERROR_WIDTH) +
-  xlab("Difference in Proportion Bet") + ylab("No message vs.") +
+  xlab("Difference in Proportion Bet") + ylab("No-Message vs.") +
   scale_x_continuous(labels = scales::percent_format(0.1), 
                      breaks = seq(-0.1, 0.05, by = 0.025))
 
@@ -585,11 +586,12 @@ Let's then take a look at the difference distribution of proportion bet after ad
 
 ```{r}
 draws_zoib2 <- get_prop_bet_draws(mzoib2)
+levels(draws_zoib2$expt_cond) <- cond_labels
 
 draws_zoib2_diff <- draws_zoib2 %>% 
   compare_levels(prop_bet, by = expt_cond) %>% 
   filter(expt_cond != COMPARISON_EXCLUDE) %>% 
-  mutate(comparison_with = str_remove(expt_cond, " - No Message"))
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
 
 draws_zoib2_diff %>% 
   mean_qi(prop_bet) 
@@ -609,7 +611,7 @@ ph1_diff_c1 <- draws_zoib2_diff %>%
   #stat_histintervalh(breaks = 40) +
   geom_vline(xintercept = 0, colour = "darkgrey") +
   stat_halfeye(.width = ERROR_WIDTH) +
-  xlab("Difference in Proportion Bet") + ylab("No message vs.") +
+  xlab("Difference in Proportion Bet") + ylab("No-Message vs.") +
   scale_x_continuous(labels = scales::percent_format(0.1), 
                      breaks = seq(-0.1, 0.05, by = 0.025))
 
@@ -653,11 +655,12 @@ Let's then take a look at the difference distribution of proportion bet after ad
 
 ```{r, message=FALSE, include=FALSE}
 draws_zoib3 <- get_prop_bet_draws(mzoib3)
+levels(draws_zoib3$expt_cond) <- cond_labels
 
 draws_zoib3_diff <- draws_zoib3 %>% 
   compare_levels(prop_bet, by = expt_cond) %>% 
   filter(expt_cond != COMPARISON_EXCLUDE) %>% 
-  mutate(comparison_with = str_remove(expt_cond, " - No Message"))
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
 ```
 
 ```{r}
@@ -679,7 +682,7 @@ ph1_diff_c2 <- draws_zoib3_diff %>%
   #stat_histintervalh(breaks = 40) +
   geom_vline(xintercept = 0, colour = "darkgrey") +
   stat_halfeye(.width = ERROR_WIDTH) +
-  xlab("Difference in Proportion Bet") + ylab("No message vs.") +
+  xlab("Difference in Proportion Bet") + ylab("No-Message vs.") +
   scale_x_continuous(labels = scales::percent_format(0.1), 
                      breaks = seq(-0.1, 0.05, by = 0.025))
 
@@ -732,10 +735,11 @@ emmeans(mh2, "expt_cond", type = "response")
 draws_h2 <- emmeans(mh2, "expt_cond", type = "response") %>% 
   gather_emmeans_draws() %>% 
   mutate(prob = plogis(.value))
+levels(draws_h2$expt_cond) <- cond_labels
 draws_h2_diff <- draws_h2 %>% 
   compare_levels(prob, by = expt_cond) %>% 
   filter(expt_cond != COMPARISON_EXCLUDE) %>% 
-  mutate(comparison_with = str_remove(expt_cond, " - No Message"))
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
 draws_h2_diff %>% 
   mean_qi(prob) 
 
@@ -756,7 +760,7 @@ ph2_diff <- draws_h2_diff %>%
   #stat_histintervalh(breaks = 40) +
   geom_vline(xintercept = 0, colour = "darkgrey") +
   stat_halfeye(.width = ERROR_WIDTH) +
-  xlab("Difference in Probability") + ylab("No message vs.") +
+  xlab("Difference in Probability") + ylab("No-Message vs.") +
   scale_x_continuous(labels = scales::percent_format(0.1))
 
 cowplot::plot_grid(ph2, ph2_diff)
@@ -892,11 +896,11 @@ draws_times_s <- emmeans(m_slognorm, "expt_cond", dpar = "sigma") %>%
   rename(sigma = .value)
 draws_slognorm <- left_join(draws_times_m, draws_times_s) %>% 
   mutate(mean = exp(m + sigma^2/2))
+levels(draws_slognorm$expt_cond) <- cond_labels
 draws_times_diff <- draws_slognorm %>% 
   compare_levels(mean, by = expt_cond) %>% 
   filter(expt_cond != COMPARISON_EXCLUDE) %>% 
-  mutate(comparison_with = str_remove(expt_cond, " - No Message"))
-
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
 ```
 
 The following table shows the predicted mean betting times which are similar to the observed ones and reproduce the ordering of conditions means.
@@ -929,7 +933,7 @@ ph3a_diff <- draws_times_diff %>%
   #stat_histintervalh(breaks = 40) +
   geom_vline(xintercept = 0, colour = "darkgrey") +
   stat_halfeye(.width = ERROR_WIDTH) +
-  xlab("Difference in Betting Time") + ylab("No message vs.") 
+  xlab("Difference in Betting Time") + ylab("No-Message vs.") 
 
 cowplot::plot_grid(ph3a, ph3a_diff)
 
@@ -1059,7 +1063,7 @@ draws_number_diff <- nb_draws %>%
   group_by(expt_cond) %>% 
   compare_levels(trunc_mean, expt_cond) %>% 
   filter(expt_cond != COMPARISON_EXCLUDE) %>% 
-  mutate(comparison_with = str_remove(expt_cond, " - No Message"))
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
 draws_number_diff %>% 
   mean_qi(trunc_mean)
 ```
@@ -1075,7 +1079,7 @@ pspin2 <- draws_number_diff %>%
   ggplot(aes(x = trunc_mean, y = comparison_with)) +
   geom_vline(xintercept = 0, color = "grey", size = 0.6) +
   stat_halfeye(.width = ERROR_WIDTH) +
-  labs(x = "Difference in mean number of spins") + ylab("No message vs.") 
+  labs(x = "Difference in mean number of spins") + ylab("No-Message vs.") 
 cowplot::plot_grid(pspin1, pspin2)
 ```
 
