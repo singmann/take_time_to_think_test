@@ -950,12 +950,22 @@ duse %>%
   geom_bar()
 ```
 
+Some descriptive statistics on the number of non-zero bet counts is:
+
+```{r}
+part_nozero %>% 
+  group_by(expt_cond) %>% 
+  summarise(across(bet_count, 
+                   .fns = list(mean = mean, median = median, sd = sd)))
+```
+
+
 Following the preregistration, we analyse the distribution after excluding all observations with 0 spins. We then use a negative binomial model to describe the data.
 
 ```{r}
 nb_mod1 <- bf(
   bet_count | trunc(lb = 1) ~ expt_cond,
-  family = negbinomial
+  family = negbinomial, center = FALSE
 )
 
 tmp_model_filename <- "model_fits/model2_v1.rda"
@@ -968,7 +978,7 @@ if (file.exists(tmp_model_filename)) {
 }
 ```
 
-This model shows no obvious convergenve problems.
+This model shows no obvious convergence problems.
 
 ```{r}
 summary(mnb1)
@@ -992,43 +1002,77 @@ When we zoom in (i.e., ignore data points above 50 for the plot), we can see the
 pp_nb + coord_cartesian(xlim = c(0, 50))
 ```
 
-Then let's take a look at the predicted number of spins:
+Then let's take a look at the predicted number of spins. To do so it is important to note that the mean parameter gives the mean of the non-truncated negative binomial distribution and not the mean of the truncated distribution. 
+
+However, we can derive the mean of the truncated distribution from first principles. More specifically, for any random variable $X$ truncated such that $X > y$ and with density function of the non-truncated distribution $f(x)$ and corresponding cumulative density function $F(x)$ its expectation $E(X|X > y)$ (or mean) is given by (see e.g., [Wikipedia](https://en.wikipedia.org/wiki/Truncated_distribution))
+$$
+E(X|X > y) = \frac{\int_y^\infty x g(x) dx}{1 - F(y)}.
+$$
+In words this formula says that the the expectation of the truncated random variable is given by the expectation derived for the truncated part of the non-truncated random variable (the numerator) divided by the probability of the truncated part.
+
+The difficulty in calculating this expectation is of course the integral in the numerator. However, because the negative binomial distribution is a discrete probability distribution and we truncate it such that $X > 0$ this calculation is trivial in the present case.
+
+Note that in the case of a discrete variable, the expectation of the truncated variable becomes the following,
+$$
+E(X|X > y) = \frac{\sum_{x=y + 1}^\infty x\, f(x)}{1 - F(y)}.
+$$
+Given this formulation it is easy to see that the expectation of the full (i.e., non-truncated) negative binomial distribution, $E(X) = \sum_{x=0}^\infty x\, f(x)$ is equal to the term in the numerator of the truncated expectation if $y = 0$. The reason for this is that the first term of the sum in $E(X)$ is zero if $x = 0$. Hence, for the negative binomial truncated at zero, the expectation is given by 
+$$
+E(X|X > 0) = \frac{E(X)}{1 - F(0)}.
+$$
+Using this formula, we can now calculate the predicted (or estimated) number of mean spins:
+
+```{r, message=FALSE, warning=FALSE}
+nb_draws <- as_draws_df(mnb1) 
+nb_draws <- nb_draws %>% 
+  mutate(
+    mu_control = exp(b_Intercept),
+    mu_banner = exp(b_Intercept + b_expt_condBanner),
+    mu_popup = exp(b_Intercept + `b_expt_condPopup&Banner`)
+  ) %>% 
+  select(starts_with("mu"), shape, 
+         .chain, .iteration, .draw) %>% 
+  pivot_longer(cols = starts_with("mu"), 
+                names_to = "which_mu", values_to = "mu")
+nb_draws <- nb_draws %>% 
+  mutate(
+    trunc_mean = mu / pnbinom(0, mu = mu, size = shape, lower.tail = FALSE)
+  ) %>% 
+  mutate(
+    expt_cond = factor(which_mu, 
+                       levels = c("mu_control", "mu_banner", "mu_popup"), 
+                       labels = cond_labels)
+  )
+
+```
+
 
 ```{r}
-mnb1 %>% 
-  emmeans("expt_cond") %>% 
-  gather_emmeans_draws() %>% 
-  mutate(mean = exp(.value)) %>% 
-  median_qi(mean)
+nb_draws %>% 
+  group_by(expt_cond) %>% 
+  mean_qi(trunc_mean)
 ```
 
 ```{r}
-draws_number_diff <- mnb1 %>% 
-  emmeans("expt_cond") %>% 
-  gather_emmeans_draws() %>% 
-  mutate(mean = exp(.value)) %>% 
-  compare_levels(mean, expt_cond) %>% 
+
+draws_number_diff <- nb_draws %>% 
+  group_by(expt_cond) %>% 
+  compare_levels(trunc_mean, expt_cond) %>% 
   filter(expt_cond != COMPARISON_EXCLUDE) %>% 
   mutate(comparison_with = str_remove(expt_cond, " - No Message"))
 draws_number_diff %>% 
-  median_qi(mean)
+  mean_qi(trunc_mean)
 ```
-
 
 Now the results figure:
 
 ```{r, out.width="100%", fig.width = 8, fig.asp=0.4}
-pspin1 <- mnb1 %>% 
-  emmeans("expt_cond") %>% 
-  gather_emmeans_draws() %>% 
-  mutate(mean = exp(.value)) %>% 
-  ungroup %>% 
-  mutate(exp_cond = factor(expt_cond, labels = cond_labels)) %>% 
-  ggplot(aes(y = expt_cond, x = mean)) +
+pspin1 <- nb_draws %>% 
+  ggplot(aes(y = expt_cond, x = trunc_mean)) +
   stat_halfeye(.width = ERROR_WIDTH) +
-  ylab(ylabel) + xlab("Predicted mean number of spins")
+  ylab(ylabel) + xlab("Mean number of spins")
 pspin2 <- draws_number_diff %>% 
-  ggplot(aes(x = mean, y = comparison_with)) +
+  ggplot(aes(x = trunc_mean, y = comparison_with)) +
   geom_vline(xintercept = 0, color = "grey", size = 0.6) +
   stat_halfeye(.width = ERROR_WIDTH) +
   labs(x = "Difference in mean number of spins") + ylab("No message vs.") 
