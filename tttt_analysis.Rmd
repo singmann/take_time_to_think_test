@@ -534,16 +534,41 @@ cowplot::plot_grid(pr1, pr2)
 Mu:
 ```{r}
 emmeans(mzoib, "expt_cond", dpar = "mu", type = "response")
+
+emmeans(mzoib, "expt_cond", dpar = "mu", type = "response") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(.value = plogis(.value)) %>% 
+  compare_levels(.value, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message")) %>% 
+  mean_qi(.value)
 ```
 
 g:
 ```{r}
 emmeans(mzoib, "expt_cond", dpar = "zipp", type = "response")
+
+emmeans(mzoib, "expt_cond", dpar = "zipp", type = "response") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(.value = plogis(.value)) %>% 
+  compare_levels(.value, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message")) %>% 
+  mean_qi(.value)
 ```
 
 e:
 ```{r}
 emmeans(mzoib, "expt_cond", dpar = "coi", type = "response")
+
+emmeans(mzoib, "expt_cond", dpar = "coi", type = "response") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(.value = plogis(.value)) %>% 
+  compare_levels(.value, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message")) %>% 
+  mean_qi(.value)
+
 ```
 
 
