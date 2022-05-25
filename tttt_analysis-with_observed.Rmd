@@ -1,0 +1,1184 @@
+---
+title: "Analysis Take Time To Think (Figures with Observed Means)"
+author: "Philip W. S. Newall, Leonardo Weiss-Cohen, Henrik Singmann, Ty Hayes, Elliot A. Ludvig, & Lukasz Walasek"
+date: "Analysis by Henrik Singmann; Script run on `r format(Sys.time(), '%d. %B %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+library("checkpoint")
+checkpoint("2022-04-10")
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(dpi=200, out.width="70%", fig.asp = 0.618,
+                      fig.width=4, fig.align = "center")
+options(width = 110)
+options("dplyr.summarise.inform" = FALSE)
+options(pillar.sigfig = 3)
+options(mc.cores = parallel::detectCores()) # fitting uses multicore by default
+```
+
+```{r check-file-structure, include=FALSE}
+if (!dir.exists("model_fits")) {
+  dir.create("model_fits")
+}
+if (!dir.exists("figures")) {
+  dir.create("figures")
+}
+```
+
+
+# Preparation
+
+```{r, message=FALSE, warning=FALSE, results='hide'}
+library("tidyverse")
+#library("tidylog")
+theme_set(theme_bw() + 
+            theme(panel.grid.major.x = element_blank(), 
+                  panel.grid.minor.x = element_blank()))
+library("brms")  # requires compilation tools for model fitting
+library("tidybayes")
+#library("BayesFactor")
+library("emmeans")
+library("binom")
+cond_labels <- c("No-Message", "Message", "Message+")
+ylabel <- "Gambling message"
+ERROR_WIDTH <- 0.95 ## default: c(0.66, 0.95)
+COMPARISON_EXCLUDE <- paste(cond_labels[3], "-", cond_labels[2])
+COL_OBSERVED <- "blue"
+COL_FILLED <- "transparent"
+SHAPE_OBSERVED <- 23
+```
+
+## Descriptive and Demographic Information
+
+```{r, message=FALSE}
+
+```
+
+```{r, message=FALSE}
+dpar <- read_csv("data/ProlificID_2022-04-08.csv") %>% 
+  mutate(
+    ppt_id = factor(ppt_id),
+    expt_cond = factor(expt_cond, levels = c(0, 1, 2), labels = cond_labels)
+  ) %>% 
+  mutate(
+    bonus = as.numeric(substr(bonus, 2, 100)),
+    age = suppressWarnings(as.numeric(age))
+  )
+
+##### Data Preparation 
+## step 1: exclude data sets that need to be excluded (see .txt file in data folder)
+dpar <- dpar %>% 
+  filter(as.numeric(as.character(ppt_id)) > 3) %>% ## remove test data
+  filter(!(ppt_id %in% c("2287", "2309"))) ## remove double participant
+
+total_n_datasets <- nrow(dpar)
+
+## step 2: only retain participants that finished experiment
+dpar <- dpar %>% 
+  filter(progress == "ProlificCompletion")
+
+## step 3: retain participants that passed the captchas
+dpar_use <- dpar %>% 
+  filter(correct_captchas >= 2) %>% 
+  droplevels()
+
+ids_use <- dpar_use$ppt_id
+```
+
+In total we have data from `r total_n_datasets + 2` participants. Of those `r nrow(dpar)` participants finished the experiment or failed at the captcha stage (i.e., did not abandon the study throughout). Of those, `r nrow(dpar_use)` solved two or more captchas and proceeded to the roulette part. All following analyses are based on these `r nrow(dpar_use)` participants.
+
+The distribution of conditions is as follows (prop = proportion):
+
+```{r}
+dpar_use %>% 
+  group_by(expt_cond) %>% 
+  summarise(n = n()) %>% 
+  mutate(prop = n/sum(n))
+```
+
+```{r, message=FALSE}
+## step 4: add information whether they have roulette experience
+dryn <- read_csv("data/Roulette YN.csv") %>% 
+  mutate(ppt_id = factor(ppt_id)) %>% 
+  mutate(Roulette = factor(Roulette, levels = c("Yes", "No"))) %>% 
+  rename(roulette = Roulette)
+dpar_use <- dpar_use %>% 
+  left_join(dryn)
+
+duse <- dpar_use %>% 
+  select(ppt_id, expt_cond, gamcare_click, bonus, bet_count, roulette)
+```
+
+Participants with and without experience in online roulette:
+```{r}
+dpar_use %>% 
+  count(roulette) %>% 
+  mutate(prop = n/sum(n))
+```
+
+Some demographic information:
+
+```{r}
+dpar_use %>% 
+  count(gender) %>% 
+  mutate(prop = n/sum(n))
+
+dpar_use %>% 
+  select(age, bonus, bet_count) %>% 
+  psych::describe()
+```
+
+Some conditional demographic information:
+
+```{r}
+dpar_use %>% 
+  count(gender, expt_cond) %>% 
+  mutate(prop = n/sum(n)) %>% 
+  filter(prop > 0.01)
+
+dpar_use %>% 
+  select(expt_cond, age, bonus, bet_count) %>% 
+  psych::describeBy(group = "expt_cond")
+```
+
+```{r, include=FALSE}
+covariates <- read_csv("data/post_questionnaire_2022-04-08.csv") %>% 
+  mutate(across(-ppt_id, ~case_when(
+    . == "Never" ~ 0,
+    . == "Sometimes" ~ 1,
+    . == "Most of the time" ~ 2, 
+    . == "Almost always" ~ 3, 
+    TRUE ~ NA_real_))) %>% 
+  mutate(ppt_id = factor(ppt_id)) %>% 
+  filter(ppt_id %in% ids_use)
+pgsi <- covariates %>% 
+  #select(-starts_with("Motives")) %>% 
+  pivot_longer(-ppt_id) %>% 
+  group_by(ppt_id) %>% 
+  summarise(pgsi = sum(value))
+
+stopifnot(all(!is.na(pgsi$pgsi)))
+
+duse <- left_join(duse, pgsi) %>% 
+  mutate(pgsi_c = pgsi - mean(pgsi))
+```
+
+Now let's take a look at the PGSI scores:
+
+```{r}
+duse %>% 
+  summarise(across(pgsi, .fns = c(mean = mean, sd = sd)))
+duse %>% 
+  group_by(expt_cond) %>% 
+  summarise(across(pgsi, .fns = c(mean = mean, sd = sd)))
+```
+
+Of the total of `r nrow(duse)` participants, `r sum(duse$bet_count == 0)` participants did not bet at all. We can take a look at the bonus as a function of whether or not participant bet:
+
+```{r}
+duse %>% 
+  mutate(bet_at_all = bet_count != 0) %>% 
+  group_by(bet_at_all) %>% 
+  summarise(
+    mean = mean(bonus),
+    median = median(bonus),
+    sd = sd(bonus),
+    n = n(),
+    min = min(bonus),
+    max = max(bonus)
+  )
+```
+
+```{r, message=FALSE}
+duse %>% 
+  mutate(bet_at_all = bet_count != 0) %>% 
+  group_by(expt_cond, bet_at_all) %>% 
+  summarise(
+    mean = mean(bonus),
+    median = median(bonus),
+    sd = sd(bonus),
+    n = n(),
+    min = min(bonus),
+    max = max(bonus)
+  )
+```
+
+Note, the expected loss when betting in our roulette task is 1/37, so participants are expected to retain 36/37 when betting:
+
+$$£5 \times \frac{36}{37} \approx £4.86$$
+
+
+Next let's take a look at our main DV, proportion of money bet, which is defined as follows:
+$$\texttt{prop_bet} = \frac{\texttt{amount}}{5 + \texttt{total_win}}$$
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+bets <- read_csv("data/roulette_2022-04-08.csv") %>% 
+  mutate(ppt_id = factor(ppt_id)) %>% 
+  mutate(across(.cols = c(old_bonus, total_stake, winnings, new_bonus), 
+                .fns = ~as.numeric(substr(., 2, 100))))
+bets2 <- bets %>% 
+  group_by(ppt_id) %>%
+  mutate(final_bonus = new_bonus[bet_no == max(bet_no)]) %>% 
+  summarise(amount = sum(abs(total_stake)), 
+            total_win = sum(winnings), 
+            bet_count_2 = n(), 
+            final_bonus = final_bonus[1]) 
+
+duse <- left_join(duse, bets2) %>% 
+  mutate(
+    amount = if_else(is.na(amount), 0, amount),
+    total_win = if_else(is.na(total_win), 0, total_win),
+    bet_count_2 = if_else(is.na(bet_count_2), 0L, bet_count_2),
+    final_bonus = if_else(is.na(final_bonus), 5, final_bonus)
+  ) %>% 
+  mutate(prop_bet = amount / (5 + total_win)) %>% 
+  mutate(prop_bet = if_else(prop_bet > 1, 1, prop_bet)) ## necessary: few values are just above 1 (but shown as 1)
+
+stopifnot(all(duse$bet_count_2 == duse$bet_count))
+duse <- duse %>% 
+  select(-bet_count_2)
+
+stopifnot(all(duse$bonus == duse$final_bonus))
+duse <- duse %>% 
+  select(-final_bonus)
+
+```
+
+
+
+```{r}
+duse %>% 
+  group_by(expt_cond) %>% 
+  summarise(across(prop_bet, .fns = c(mean = mean, sd = sd)))
+```
+
+# Distribution of DV
+
+Our DV clearly does not look normally distributed.
+
+```{r}
+duse %>% 
+  ggplot(aes(x = prop_bet, y = after_stat(density * width))) +
+  geom_histogram(binwidth = 0.025) +
+  labs(y = "proportion")
+```
+
+```{r}
+duse %>% 
+  summarise(gamble_at_all = 1 - mean(prop_bet  == 0), 
+            gamble_everything = mean(prop_bet[prop_bet != 0] == 1),
+            proportion_bet_rest = mean(prop_bet[!(prop_bet %in% c(0, 1))]))
+
+duse %>% 
+  summarise(no_gamble = sum(prop_bet  == 0),
+            gamble_at_all = sum(prop_bet  != 0), 
+            gamble_everything = sum(prop_bet[prop_bet != 0] == 1))
+
+
+```
+
+Binomial confidence or credibility intervals for the probability to gamble at all:
+
+```{r}
+binom.confint(nrow(duse) - sum(duse$prop_bet == 0), nrow(duse))
+```
+
+Distribution per condition:
+
+```{r,  out.width="100%", fig.asp=0.4}
+duse %>% 
+  ggplot(aes(x = prop_bet, y = after_stat(density * width))) +
+  geom_histogram(binwidth = 0.025) +
+  facet_wrap(vars(expt_cond)) +
+  labs(y = "proportion") 
+```
+
+# Hypothesis 1: Zero-One Inflated Beta Regression on Proportion Bet
+
+We use a custom parameterization of a zero-one-inflated beta-regression model (see also [here](https://vuorre.netlify.com/post/2019/02/18/analyze-analog-scale-ratings-with-zero-one-inflated-beta-models/)). The likelihood of the model is given by:
+
+$$\begin{align}
+f(y) &= (1 - g) & & \text{if } y = 0 \\
+f(y) &= g \times e & & \text{if } y = 1 \\
+f(y) &= g \times (1 - e) \times \text{Beta}(a,b) & & \text{if } y \notin \{0, 1\} \\
+a &= \mu \times \phi \\
+b &= (1-\mu) \times \phi
+\end{align}$$
+
+Where $1 - g$ is the zero inflation probability, `zipp` is $g$ and reflects the probability to gamble, $e$ is the conditional one-inflation probability (`coi`) or conditional probability to gamble everything (i.e., conditional probability to have a value of one, if one gambles), $\mu$ is the mean of the beta distribution (`Intercept`), and $\phi$ is the precision of the beta distribution (`phi`). As we use `Stan` for modelling, we need to model on the real line and need appropriate link functions. For `\phi` the link is log (inverse is `exp()`), for all other parameters it is logit (inverse is `plogis()`).
+
+We fit this model and add experimental condition as a factor to the three main model parameters (i.e., only the precision parameter is fixed across conditions). The following table provides the overview of the model and all model parameters and show good convergence.
+
+```{r, eval=TRUE, include=FALSE}
+zoib2 <- custom_family(
+  "zoib2", dpars = c("mu", "phi", "zipp", "coi"),
+  links = c("logit", "log", "logit", "logit"), lb = c(NA, 0, NA, NA),
+  type = "real"
+)
+
+stan_funs <- "
+/* zero-one-inflated beta log-PDF of a single response 
+   * Args: 
+   *   y: response value 
+   *   mu: mean parameter of the beta part
+   *   phi: precision parameter of the beta part
+   *   zipp: zero-inflation probability parameter
+   *   coi: conditional one-inflation probability
+   * Returns:  
+   *   a scalar to be added to the log posterior 
+   */ 
+   real zoib2_lpdf(real y, real mu, real phi,
+                                    real zipp, real coi) {
+     row_vector[2] shape = [mu * phi, (1 - mu) * phi]; 
+     if (y == 0) { 
+       return bernoulli_lpmf(0 | zipp); 
+     } else if (y == 1) {
+       return bernoulli_lpmf(1 | zipp) + bernoulli_lpmf(1 | coi);
+     } else { 
+       return bernoulli_lpmf(1 | zipp) + bernoulli_lpmf(0 | coi) + beta_lpdf(y | shape[1], shape[2]);
+     } 
+   }
+"
+stanvars <- stanvar(scode = stan_funs, block = "functions")
+
+zoib_model <- bf(
+  prop_bet ~ 0 + Intercept + expt_cond,
+  phi ~ 1,
+  zipp ~ 0 + Intercept + expt_cond,
+  coi ~ 0 + Intercept + expt_cond, 
+  family = zoib2, center = FALSE, cmc = FALSE, nl = FALSE
+)
+
+# make_stancode(zoib_model, data = duse, stanvars = stanvars)
+# tmp <- make_standata(zoib_model, data = part2, stanvars = stanvars) 
+# str(tmp)
+# tmp$Y
+tmp_model_filename <- "model_fits/model_zoib.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  mzoib <- brm(formula = zoib_model, data = duse, 
+               stanvars = stanvars, 
+               iter = 26000, warmup = 1000, chains = 4) ## 100,000 post-warmup
+save(mzoib, file = tmp_model_filename, compress = "xz")
+}
+
+```
+
+
+```{r}
+summary(mzoib)
+```
+
+As a visual convergence check, we plot the density and trace plots for the four intercept parameters representing the no message (control) condition or the overall mean (for `phi`).
+
+```{r, fig.asp=1.2}
+plot(mzoib, variable = "Intercept", regex = TRUE)
+```
+
+
+```{r, include=FALSE, eval = FALSE}
+get_variables(mzoib)
+```
+
+
+The model does not have any obvious problems, even without priors for the condition specific effects.
+
+## Posterior Predictive Checks
+
+As expected the synthetic data generated from the model looks a lot like the actual data. This suggests that the model is adequate for the data.
+
+```{r}
+## we need to create a custom RNG function for this case
+posterior_predict_zoib2 <- function(i, prep, ...) {
+  zi <- brms:::get_dpar(prep, "zipp", i)
+  coi <- brms:::get_dpar(prep, "coi", i)
+  mu <- brms:::get_dpar(prep, "mu", i = i)
+  phi <- brms:::get_dpar(prep, "phi", i = i)
+  hu <- runif(prep$ndraws, 0, 1)
+  hu2 <- runif(prep$ndraws, 0, 1)
+  #one_or_zero <- runif(prep$nsamples, 0, 1)
+  ifelse(hu > zi, 0, 
+    ifelse(hu2 < coi, 1, 
+           rbeta(prep$ndraws, shape1 = mu * phi, shape2 = (1 - mu) * phi)
+  ))
+}
+
+```
+
+```{r, fig.width=6, out.width="100%"}
+pp1 <- pp_check(mzoib, type = "hist", binwidth = 0.025, ndraws = 11) +
+  coord_cartesian(ylim = c(0, 700)) +
+  theme(legend.position = "none")
+pp1
+ggsave(plot = pp1, filename = "figures/ppp.png", width = 8, height = 6)
+
+```
+
+## Proportion Bet
+
+Our hypothesis is a bout proportion bet, $Pr_{bet}$ which is given by:
+
+$$Pr_{bet} = (g * e) + (g * (1-e) * \mu)$$
+
+The following show the resulting $Pr_{bet}$ posterior distributions across conditions. 
+
+```{r}
+get_draws <- function(model, dpar) {
+  emmeans(model, "expt_cond", dpar = dpar) %>% 
+    gather_emmeans_draws() %>% 
+    mutate(.value = plogis(.value)) %>% 
+    rename({{dpar}} := .value)
+}
+get_prop_bet_draws <- function(model) {
+  draws_mu <- get_draws(model, dpar = "mu")
+  draws_g <- get_draws(model, dpar = "zipp")
+  draws_e <- get_draws(model, dpar = "coi")
+  left_join(draws_mu, draws_g) %>% 
+    left_join(draws_e) %>% 
+    rename(
+      g = zipp,
+      e = coi
+    ) %>% 
+    mutate(
+      prop_bet = (g * e) + (g * (1-e) * mu) 
+    )
+}
+```
+
+
+```{r, include=FALSE}
+draws_zoib <- get_prop_bet_draws(mzoib)
+levels(draws_zoib$expt_cond) <- cond_labels
+
+draws_zoib_diff <- draws_zoib %>% 
+  compare_levels(prop_bet, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
+
+```
+
+```{r}
+draws_zoib %>% 
+  group_by(expt_cond) %>% 
+  mean_qi(prop_bet) 
+
+draws_zoib_diff %>% 
+  mean_qi(prop_bet) 
+```
+
+
+```{r, include=FALSE, eval=FALSE}
+## combines two message conditions into one. refitting would be better though.
+draws_zoib2 <- draws_zoib %>% 
+  mutate(
+    expt_cond2 = if_else(
+      condition = expt_cond == "No Message", 
+      true = "No Message", 
+      false = "Any Message")
+  ) %>% 
+  mutate(
+    expt_cond2 = factor(expt_cond2, levels = c("No Message", "Any Message"))
+  ) %>% 
+  group_by(expt_cond2, .draw) %>% 
+  summarise(prop_bet = mean(prop_bet))
+
+draws_zoib2 %>% 
+  group_by(expt_cond2) %>% 
+  mean_qi(prop_bet) 
+
+draws_zoib2 %>% 
+  compare_levels(prop_bet, by = expt_cond2) %>% 
+  mean_qi(prop_bet) 
+
+```
+
+```{r, include=FALSE}
+prop_bet_agg <- duse %>% 
+  group_by(expt_cond) %>% 
+  summarise(prop_bet = mean(prop_bet))
+
+prop_bet_agg_diff <- prop_bet_agg %>% 
+  compare_levels(prop_bet, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
+```
+
+
+```{r, out.width="100%", fig.width = 8, fig.asp=0.4}
+pr1 <- draws_zoib %>% 
+  ggplot(aes(x = prop_bet, y = expt_cond)) +
+  #stat_histintervalh(breaks = 40) +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  geom_point(colour = COL_OBSERVED, data = prop_bet_agg, 
+             shape = SHAPE_OBSERVED, fill = COL_FILLED, stroke = 2) +
+  xlab("Proportion Bet") + ylab(ylabel) +
+  scale_x_continuous(labels = scales::percent_format(1))
+pr2 <- draws_zoib_diff %>% 
+  ggplot(aes(x = prop_bet, y = comparison_with)) +
+  #stat_histintervalh(breaks = 40) +
+  geom_vline(xintercept = 0, colour = "darkgrey") +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  geom_point(colour = COL_OBSERVED, data = prop_bet_agg_diff, 
+             shape = SHAPE_OBSERVED, fill = COL_FILLED, stroke = 2) +
+  xlab("Difference in Proportion Bet") + ylab("No-Message vs.") +
+  scale_x_continuous(labels = scales::percent_format(0.1), 
+                     breaks = seq(-0.1, 0.05, by = 0.025))
+
+cowplot::plot_grid(pr1, pr2)
+
+# pr1 + theme_bw(base_size = 17)
+# ggsave(pr1  + theme_bw(base_size = 17), filename = "figures/res_e1a.png", 
+#        width = 9.5, height = 4.5)
+# ggsave(pr1  + theme_bw(base_size = 17) + theme(panel.grid.minor.x = element_blank()), 
+#        filename = "figures/res_e1b.png", 
+#        width = 9.5, height = 4.5)
+# ggsave(pr1  + theme_bw(base_size = 17) + theme(
+#   panel.grid.minor.x = element_blank(), 
+#   panel.grid.major.x = element_blank()), 
+#        filename = "figures/res_e1c.png", 
+#        width = 9.5, height = 4.5)
+# pr1use <- pr1  + theme_bw(base_size = 17) + theme(
+#   panel.grid.minor.x = element_blank(), 
+#   panel.grid.major.x = element_blank())
+```
+
+## Individual ZOIBR Parameters
+
+Mu:
+```{r}
+emmeans(mzoib, "expt_cond", dpar = "mu", type = "response")
+
+emmeans(mzoib, "expt_cond", dpar = "mu", type = "response") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(.value = plogis(.value)) %>% 
+  compare_levels(.value, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message")) %>% 
+  mean_qi(.value)
+```
+
+g:
+```{r}
+emmeans(mzoib, "expt_cond", dpar = "zipp", type = "response")
+
+emmeans(mzoib, "expt_cond", dpar = "zipp", type = "response") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(.value = plogis(.value)) %>% 
+  compare_levels(.value, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message")) %>% 
+  mean_qi(.value)
+```
+
+e:
+```{r}
+emmeans(mzoib, "expt_cond", dpar = "coi", type = "response")
+
+emmeans(mzoib, "expt_cond", dpar = "coi", type = "response") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(.value = plogis(.value)) %>% 
+  compare_levels(.value, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message")) %>% 
+  mean_qi(.value)
+
+```
+
+
+# Hypothesis 1: Control Analysis with PGSI
+
+## Variant 1: PGSI Entered as Main Effect
+
+```{r, eval=TRUE, include=FALSE}
+zoib_model2 <- bf(
+  prop_bet ~ expt_cond + pgsi_c,
+  phi ~ 1,
+  zipp ~ expt_cond + pgsi_c,
+  coi ~ expt_cond + pgsi_c, 
+  family = zoib2
+)
+
+tmp_model_filename <- "model_fits/model_zoib2.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  mzoib2 <- brm(formula = zoib_model2, data = duse, 
+                stanvars = stanvars, 
+                iter = 26000, warmup = 1000, chains = 4)
+  save(mzoib2, file = tmp_model_filename, compress = "xz")
+}
+
+```
+
+```{r}
+summary(mzoib2)
+```
+
+As a visual convergence check, we plot the density and trace plots for the four intercept pasrameters representing the no message condition or the overall mean (for `phi`).
+
+```{r, fig.asp=1.2}
+plot(mzoib2, variable = "Intercept", regex = TRUE)
+```
+
+Let's then take a look at the difference distribution of proportion bet after adjusting for PGSI:
+
+```{r}
+draws_zoib2 <- get_prop_bet_draws(mzoib2)
+levels(draws_zoib2$expt_cond) <- cond_labels
+
+draws_zoib2_diff <- draws_zoib2 %>% 
+  compare_levels(prop_bet, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
+
+draws_zoib2_diff %>% 
+  mean_qi(prop_bet) 
+
+```
+
+```{r, out.width="100%", fig.width = 8, fig.asp=0.4}
+ph1_c1 <- draws_zoib2 %>% 
+  ggplot(aes(x = prop_bet, y = expt_cond)) +
+  #stat_histintervalh(breaks = 40) +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  xlab("Proportion Bet") + ylab(ylabel) +
+  scale_x_continuous(labels = scales::percent_format(1))
+
+ph1_diff_c1 <- draws_zoib2_diff %>% 
+  ggplot(aes(x = prop_bet, y = comparison_with)) +
+  #stat_histintervalh(breaks = 40) +
+  geom_vline(xintercept = 0, colour = "darkgrey") +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  xlab("Difference in Proportion Bet") + ylab("No-Message vs.") +
+  scale_x_continuous(labels = scales::percent_format(0.1), 
+                     breaks = seq(-0.1, 0.05, by = 0.025))
+
+cowplot::plot_grid(ph1_c1, ph1_diff_c1)
+```
+
+## Variant 2: PGSI Entered as Interaction
+
+```{r, eval=TRUE, include=FALSE}
+zoib_model3 <- bf(
+  prop_bet ~ expt_cond * pgsi_c,
+  phi ~ 1,
+  zipp ~ expt_cond * pgsi_c,
+  coi ~ expt_cond * pgsi_c, 
+  family = zoib2
+)
+
+tmp_model_filename <- "model_fits/model_zoib3.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  mzoib3 <- brm(formula = zoib_model3, data = duse, 
+                stanvars = stanvars, 
+                iter = 26000, warmup = 1000, chains = 4)
+  save(mzoib3, file = tmp_model_filename, compress = "xz")
+}
+
+```
+
+```{r}
+summary(mzoib3)
+```
+
+As a visual convergence check, we plot the density and trace plots for the four intercept pasrameters representing the no message condition or the overall mean (for `phi`).
+
+```{r, fig.asp=1.2}
+plot(mzoib3, variable = "Intercept", regex = TRUE)
+```
+
+Let's then take a look at the difference distribution of proportion bet after adjusting for PGSI:
+
+```{r, message=FALSE, include=FALSE}
+draws_zoib3 <- get_prop_bet_draws(mzoib3)
+levels(draws_zoib3$expt_cond) <- cond_labels
+
+draws_zoib3_diff <- draws_zoib3 %>% 
+  compare_levels(prop_bet, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
+```
+
+```{r}
+draws_zoib3_diff %>% 
+  mean_qi(prop_bet) 
+```
+
+
+```{r, out.width="100%", fig.width = 8, fig.asp=0.4}
+ph1_c2 <- draws_zoib3 %>% 
+  ggplot(aes(x = prop_bet, y = expt_cond)) +
+  #stat_histintervalh(breaks = 40) +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  xlab("Proportion Bet") + ylab(ylabel) +
+  scale_x_continuous(labels = scales::percent_format(1))
+
+ph1_diff_c2 <- draws_zoib3_diff %>% 
+  ggplot(aes(x = prop_bet, y = comparison_with)) +
+  #stat_histintervalh(breaks = 40) +
+  geom_vline(xintercept = 0, colour = "darkgrey") +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  xlab("Difference in Proportion Bet") + ylab("No-Message vs.") +
+  scale_x_continuous(labels = scales::percent_format(0.1), 
+                     breaks = seq(-0.1, 0.05, by = 0.025))
+
+cowplot::plot_grid(ph1_c2, ph1_diff_c2)
+```
+
+# Hypothesis 2: Clicks (Yes/No) on the GamCare information page
+
+Let's begin with some simple descriptive statistics of the clicks on the GamCare page.
+
+```{r}
+duse %>% 
+  group_by(expt_cond) %>% 
+  summarise(
+    proportion = mean(gamcare_click),
+    sd = sd(gamcare_click), 
+    success = sum(gamcare_click),
+    n = n()
+  ) 
+```
+
+
+```{r, eval=TRUE, include=FALSE}
+tmp_model_filename <- "model_fits/model_h2_1.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  mh2 <- brm(formula = gamcare_click ~ expt_cond, 
+             data = duse, 
+             family = bernoulli(),
+             iter = 26000, warmup = 1000, chains = 4)
+  save(mh2, file = tmp_model_filename, compress = "xz")
+}
+```
+
+Model shows no obvious convergence problems:
+
+```{r}
+summary(mh2)
+```
+
+```{r, fig.asp=0.8}
+plot(mh2)
+```
+
+Let's take a look at the predicted probabilities and differences
+
+```{r}
+emmeans(mh2, "expt_cond", type = "response")
+draws_h2 <- emmeans(mh2, "expt_cond", type = "response") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(prob = plogis(.value))
+levels(draws_h2$expt_cond) <- cond_labels
+draws_h2_diff <- draws_h2 %>% 
+  compare_levels(prob, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
+draws_h2_diff %>% 
+  mean_qi(prob) 
+
+```
+
+```{r, include=FALSE}
+d_agg <- duse %>% 
+  group_by(expt_cond) %>% 
+  summarise(prob = mean(gamcare_click))
+
+d_agg_diff <- d_agg %>% 
+  compare_levels(prob, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
+```
+
+
+Now the results figure:
+
+```{r, out.width="100%", fig.width = 8, fig.asp=0.4}
+
+ph2 <- draws_h2 %>% 
+  ggplot(aes(x = prob, y = expt_cond)) +
+  #stat_histintervalh(breaks = 40) +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  geom_point(colour = COL_OBSERVED, data = d_agg, 
+             shape = SHAPE_OBSERVED, fill = COL_FILLED, stroke = 2) +
+  xlab("Probability of GamCare Click") + ylab(ylabel) +
+  scale_x_continuous(labels = scales::percent_format(1))
+ph2_diff <- draws_h2_diff %>% 
+  ggplot(aes(x = prob, y = comparison_with)) +
+  #stat_histintervalh(breaks = 40) +
+  geom_vline(xintercept = 0, colour = "darkgrey") +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  geom_point(colour = COL_OBSERVED, data = d_agg_diff, 
+             shape = SHAPE_OBSERVED, fill = COL_FILLED, stroke = 2) +
+  xlab("Difference in Probability") + ylab("No-Message vs.") +
+  scale_x_continuous(labels = scales::percent_format(0.1))
+
+cowplot::plot_grid(ph2, ph2_diff)
+
+```
+
+# Hypothesis 3a: Mean Speed Of Play
+
+```{r, include=FALSE}
+bets_use <- bets %>% 
+  filter(ppt_id %in% ids_use) %>% 
+  mutate(time = `play_duration (ms)` / 1000) %>% 
+  select(ppt_id, bet_no, time, old_bonus, total_stake, winnings, new_bonus) %>% 
+  left_join(select(dpar_use, ppt_id, expt_cond))
+```
+
+```{r, include=FALSE}
+times_use <- bets_use %>% 
+  filter(bet_no > 1)
+
+pexcl <- scales::percent(mean(times_use$time > 120), accuracy = 0.01)
+
+times_use2 <- times_use %>% 
+  filter(time < 120)
+```
+
+There are total of `r nrow(bets_use)` bets. If we remove the first bet of each participant, `r nrow(times_use)` bets remain. Of those, `r sum(times_use$time > 120)`  (`r pexcl`) bets took longer than 120 seconds. Following our pre-registration, we remove these betting times from analysis.  
+
+The following histogram shows the distribution of betting times.
+
+```{r}
+ggplot(times_use2, aes(x = time)) +
+  geom_histogram(binwidth = 1)
+```
+
+We can also take a look at some descriptive statistics of the distribution:
+
+```{r}
+times_use2 %>% 
+  summarise(across(time, 
+                   .fns = list(mean = mean, median = median, sd = sd)))
+
+times_use2 %>% 
+  group_by(expt_cond) %>% 
+  summarise(across(time, 
+                   .fns = list(mean = mean, median = median, sd = sd)))
+```
+
+
+We analyse the betting times shown above using a shifted-lognormal model with by-participant random intercepts for the log-mean allowing both log-mean and log-SD to vary across message conditions. The following shows the  model summary (which show no obvious convergence problems).  
+
+```{r, include=FALSE}
+
+tmp_model_filename <- "model_fits/model_slognormal.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  m_slognorm <- brm(bf(time ~ expt_cond + (1|ppt_id), 
+                       sigma ~ expt_cond), 
+                    data = times_use2, 
+                    family = shifted_lognormal(),
+                    iter = 6000, warmup = 1000, chains = 10, 
+                    thin = 3  ## to reduce model size on disk
+  ) 
+  save(m_slognorm, file = tmp_model_filename, compress = "xz")
+}
+
+
+```
+
+```{r, include=FALSE, eval=FALSE}
+## shows divergent transisitions
+tmp_model_filename <- "model_fits/model_slognormal2.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  m_slognorm_2 <- brm(bf(time ~ expt_cond + (1|ppt_id), 
+                       sigma ~ expt_cond, 
+                       ndt ~ expt_cond), 
+                    data = times_use2, 
+                    family = shifted_lognormal(),
+                    iter = 7000, warmup = 1000, chains = 10, 
+                    thin = 3  ## to reduce model size on disk
+  ) 
+  save(m_slognorm_2, file = tmp_model_filename, compress = "xz")
+}
+
+
+```
+
+
+```{r}
+summary(m_slognorm)
+```
+
+The summary table shows that one of the message specific parameters for the log-SD provides evidence for a difference between the no message and message condition (the 95% CI for `sigma_expt_condMessage1` does not include 0).
+
+The model shows no obvious convergence problems:
+
+```{r, fig.asp=2.0}
+plot(m_slognorm, 
+     variable = get_variables(m_slognorm)[c(1, 2, 3, 4, 5, 6, 7, 8)], 
+     N = 8)
+```
+
+The model is also able to adequately reproduce the shape of the observed data.
+
+```{r, fig.width=6, out.width="100%"}
+pp1 <- pp_check(m_slognorm, type = "hist", binwidth = 1, ndraws = 11) +
+  theme(legend.position = "none") +
+  coord_cartesian(xlim = c(0, 120), ylim = c(0, 1700))
+pp1
+
+```
+
+```{r, fig.width=6, out.width="100%", eval=FALSE, include=FALSE}
+pp1 <- pp_check(m_slognorm, type = "dens_overlay", ndraws = 11) +
+  theme(legend.position = "none") +
+  coord_cartesian(xlim = c(0, 120))
+pp1
+
+```
+
+Our hypothesis is about the mean betting time, which we need to calculate from the model parameters log-mean m and log-SD sigma as mean = exp(m + sigma^2/2).
+
+```{r, include=FALSE}
+draws_times_m <- emmeans(m_slognorm, "expt_cond") %>% 
+  gather_emmeans_draws() %>% 
+  rename(m = .value)
+draws_times_s <- emmeans(m_slognorm, "expt_cond", dpar = "sigma") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(.value = exp(.value)) %>% 
+  rename(sigma = .value)
+draws_slognorm <- left_join(draws_times_m, draws_times_s) %>% 
+  mutate(mean = exp(m + sigma^2/2))
+levels(draws_slognorm$expt_cond) <- cond_labels
+draws_times_diff <- draws_slognorm %>% 
+  compare_levels(mean, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
+```
+
+The following table shows the predicted mean betting times which are similar to the observed ones and reproduce the ordering of conditions means.
+
+```{r}
+draws_slognorm %>% 
+  mean_qi(mean)
+```
+
+We can also take a look at the differences from the no message condition:
+
+```{r}
+draws_times_diff %>% 
+  mean_qi(mean) 
+
+```
+
+```{r, include=FALSE}
+d_agg <- times_use2 %>% 
+  # group_by(expt_cond, ppt_id) %>%
+  # summarise(time = mean(time)) %>% 
+  group_by(expt_cond) %>% 
+  summarise(mean = mean(time))
+
+d_agg_diff <- d_agg %>% 
+  compare_levels(mean, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
+```
+
+
+Now the results figure:
+
+```{r, out.width="100%", fig.width = 8, fig.asp=0.4}
+
+ph3a <- draws_slognorm %>% 
+  ggplot(aes(x = mean, y = expt_cond)) +
+  #stat_histintervalh(breaks = 40) +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  geom_point(colour = COL_OBSERVED, data = d_agg, 
+             shape = SHAPE_OBSERVED, fill = COL_FILLED, stroke = 2) +
+  xlab("Mean Betting Time (s)") + ylab(ylabel)
+ph3a_diff <- draws_times_diff %>% 
+  ggplot(aes(x = mean, y = comparison_with)) +
+  #stat_histintervalh(breaks = 40) +
+  geom_vline(xintercept = 0, colour = "darkgrey") +
+  stat_halfeye(.width = ERROR_WIDTH) +
+    geom_point(colour = COL_OBSERVED, data = d_agg_diff, 
+             shape = SHAPE_OBSERVED, fill = COL_FILLED, stroke = 2) +
+  xlab("Difference in Betting Time") + ylab("No-Message vs.") 
+
+cowplot::plot_grid(ph3a, ph3a_diff)
+
+```
+
+# Hypothesis 3b: Total Number of Spins
+
+The following histograms shows the distribution of the number of spins.
+
+```{r}
+part_nozero <- duse %>% 
+  filter(bet_count != 0)
+```
+
+```{r}
+duse %>% 
+  ggplot(aes(bet_count)) +
+  geom_bar()
+```
+
+Some descriptive statistics on the number of non-zero bet counts is:
+
+```{r}
+part_nozero %>% 
+  group_by(expt_cond) %>% 
+  summarise(across(bet_count, 
+                   .fns = list(mean = mean, median = median, sd = sd)))
+```
+
+
+Following the preregistration, we analyse the distribution after excluding all observations with 0 spins. We then use a negative binomial model to describe the data.
+
+```{r}
+nb_mod1 <- bf(
+  bet_count | trunc(lb = 1) ~ expt_cond,
+  family = negbinomial, center = FALSE
+)
+
+tmp_model_filename <- "model_fits/model2_v1.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  mnb1 <- brm(formula = nb_mod1, data = part_nozero, 
+                iter = 26000, warmup = 1000, chains = 4)
+  save(mnb1, file = tmp_model_filename, compress = "xz")
+}
+```
+
+This model shows no obvious convergence problems.
+
+```{r}
+summary(mnb1)
+```
+
+```{r, fig.asp=0.9}
+plot(mnb1)
+```
+
+The data seems to be well described by the model.
+
+```{r, fig.width=6, out.width="100%", warning=FALSE}
+pp_nb <- pp_check(mnb1, type = "hist", binwidth = 0.025, ndraws = 11, 
+                  ntrys = 10) 
+pp_nb
+```
+
+When we zoom in (i.e., ignore data points above 50 for the plot), we can see the that the real and synthetic data match quite well.
+
+```{r, fig.width=6, out.width="100%", warning=FALSE}
+pp_nb + coord_cartesian(xlim = c(0, 50))
+```
+
+Then let's take a look at the predicted number of spins. To do so it is important to note that the mean parameter gives the mean of the non-truncated negative binomial distribution and not the mean of the truncated distribution. 
+
+However, we can derive the mean of the truncated distribution from first principles. More specifically, for any random variable $X$ truncated such that $X > y$ and with density function of the non-truncated distribution $f(x)$ and corresponding cumulative density function $F(x)$ its expectation $E(X|X > y)$ (or mean) is given by (see e.g., [Wikipedia](https://en.wikipedia.org/wiki/Truncated_distribution))
+$$
+E(X|X > y) = \frac{\int_y^\infty x f(x) dx}{1 - F(y)}.
+$$
+In words this formula says that the the expectation of the truncated random variable is given by the expectation derived for the truncated part of the non-truncated random variable (the numerator) divided by the probability of the truncated part.
+
+The difficulty in calculating this expectation is of course the integral in the numerator. However, because the negative binomial distribution is a discrete probability distribution and we truncate it such that $X > 0$ this calculation is trivial in the present case.
+
+Note that in the case of a discrete variable, the expectation of the truncated variable becomes the following,
+$$
+E(X|X > y) = \frac{\sum_{x=y + 1}^\infty x\, f(x)}{1 - F(y)}.
+$$
+Given this formulation it is easy to see that the expectation of the full (i.e., non-truncated) negative binomial distribution, $E(X) = \sum_{x=0}^\infty x\, f(x)$ is equal to the term in the numerator of the truncated expectation if $y = 0$. The reason for this is that the first term of the sum in $E(X)$ is zero if $x = 0$. Hence, for the negative binomial truncated at zero, the expectation is given by 
+$$
+E(X|X > 0) = \frac{E(X)}{1 - F(0)}.
+$$
+Using this formula, we can now calculate the predicted (or estimated) number of mean spins:
+
+```{r, message=FALSE, warning=FALSE}
+nb_draws <- as_draws_df(mnb1) 
+nb_draws <- nb_draws %>% 
+  mutate(
+    mu_control = exp(b_Intercept),
+    mu_banner = exp(b_Intercept + b_expt_condBanner),
+    mu_popup = exp(b_Intercept + `b_expt_condPopup&Banner`)
+  ) %>% 
+  select(starts_with("mu"), shape, 
+         .chain, .iteration, .draw) %>% 
+  pivot_longer(cols = starts_with("mu"), 
+                names_to = "which_mu", values_to = "mu")
+nb_draws <- nb_draws %>% 
+  mutate(
+    trunc_mean = mu / pnbinom(0, mu = mu, size = shape, lower.tail = FALSE)
+  ) %>% 
+  mutate(
+    expt_cond = factor(which_mu, 
+                       levels = c("mu_control", "mu_banner", "mu_popup"), 
+                       labels = cond_labels)
+  )
+
+```
+
+
+```{r}
+nb_draws %>% 
+  group_by(expt_cond) %>% 
+  mean_qi(trunc_mean)
+```
+
+```{r}
+
+draws_number_diff <- nb_draws %>% 
+  group_by(expt_cond) %>% 
+  compare_levels(trunc_mean, expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
+draws_number_diff %>% 
+  mean_qi(trunc_mean)
+```
+
+Now the results figure:
+
+```{r, include=FALSE}
+d_agg <- part_nozero %>% 
+  group_by(expt_cond) %>% 
+  summarise(trunc_mean = mean(bet_count))
+
+d_agg_diff <- d_agg %>% 
+  compare_levels(trunc_mean, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
+```
+
+
+```{r, out.width="100%", fig.width = 8, fig.asp=0.4}
+pspin1 <- nb_draws %>% 
+  ggplot(aes(y = expt_cond, x = trunc_mean)) +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  geom_point(colour = COL_OBSERVED, data = d_agg, 
+             shape = SHAPE_OBSERVED, fill = COL_FILLED, stroke = 2) +
+  ylab(ylabel) + xlab("Mean number of spins")
+pspin2 <- draws_number_diff %>% 
+  ggplot(aes(x = trunc_mean, y = comparison_with)) +
+  geom_vline(xintercept = 0, color = "grey", size = 0.6) +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  geom_point(colour = COL_OBSERVED, data = d_agg_diff, 
+             shape = SHAPE_OBSERVED, fill = COL_FILLED, stroke = 2) +
+  labs(x = "Difference in mean number of spins") + ylab("No-Message vs.") 
+cowplot::plot_grid(pspin1, pspin2)
+```
+
+
+# System
+
+```{r}
+sessionInfo()
+```
+
