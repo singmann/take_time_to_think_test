@@ -500,7 +500,8 @@ pr1 <- draws_zoib %>%
   #stat_histintervalh(breaks = 40) +
   stat_halfeye(.width = ERROR_WIDTH) +
   xlab("Proportion Bet") + ylab(ylabel) +
-  scale_x_continuous(labels = scales::percent_format(1))
+  scale_x_continuous(labels = scales::percent_format(1), 
+                     breaks = seq(0.29, 0.4, by = 0.02))  
 
 pr2 <- draws_zoib_diff %>% 
   ggplot(aes(x = prop_bet, y = comparison_with)) +
@@ -508,10 +509,14 @@ pr2 <- draws_zoib_diff %>%
   geom_vline(xintercept = 0, colour = "darkgrey") +
   stat_halfeye(.width = ERROR_WIDTH) +
   xlab("Difference in Proportion Bet") + ylab("No-Message vs.") +
-  scale_x_continuous(labels = scales::percent_format(0.1), 
-                     breaks = seq(-0.1, 0.05, by = 0.025))
+  scale_x_continuous(labels = scales::percent_format(1), 
+                     breaks = seq(-0.1, 0.05, by = 0.02)) #+
+  #theme(panel.grid.major.x = element_line())
 
 cowplot::plot_grid(pr1, pr2)
+
+ggsave(plot = cowplot::plot_grid(pr1, pr2), 
+       filename = "figures/res_prop_bet.png", width = 8, height = 8*0.4, dpi = 500)
 
 # pr1 + theme_bw(base_size = 17)
 # ggsave(pr1  + theme_bw(base_size = 17), filename = "figures/res_e1a.png", 
