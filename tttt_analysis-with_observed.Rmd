@@ -953,8 +953,13 @@ draws_times_s <- emmeans(m_slognorm, "expt_cond", dpar = "sigma") %>%
   gather_emmeans_draws() %>% 
   mutate(.value = exp(.value)) %>% 
   rename(sigma = .value)
+draws_times_ndt <- m_slognorm %>% 
+  as_draws_df(variable = "ndt") %>% 
+  as_tibble() %>% 
+  select(ndt, .draw)
 draws_slognorm <- left_join(draws_times_m, draws_times_s) %>% 
-  mutate(mean = exp(m + sigma^2/2))
+  left_join(draws_times_ndt) %>% 
+  mutate(mean = ndt + exp(m + sigma^2/2))
 levels(draws_slognorm$expt_cond) <- cond_labels
 draws_times_diff <- draws_slognorm %>% 
   compare_levels(mean, by = expt_cond) %>% 
