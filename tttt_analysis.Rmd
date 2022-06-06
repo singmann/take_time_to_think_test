@@ -47,6 +47,9 @@ cond_labels <- c("No-Message", "Message", "Message+")
 ylabel <- "Gambling message"
 ERROR_WIDTH <- 0.95 ## default: c(0.66, 0.95)
 COMPARISON_EXCLUDE <- paste(cond_labels[3], "-", cond_labels[2])
+COL_OBSERVED <- "blue"
+COL_FILLED <- "transparent"
+SHAPE_OBSERVED <- 23
 ```
 
 ## Descriptive and Demographic Information
@@ -534,6 +537,43 @@ ggsave(plot = cowplot::plot_grid(pr1, pr2),
 #   panel.grid.major.x = element_blank())
 ```
 
+Same plot with observed data overlaid:
+
+```{r, include=FALSE}
+prop_bet_agg <- duse %>% 
+  group_by(expt_cond) %>% 
+  summarise(prop_bet = mean(prop_bet))
+
+prop_bet_agg_diff <- prop_bet_agg %>% 
+  compare_levels(prop_bet, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
+```
+
+
+```{r, out.width="100%", fig.width = 8, fig.asp=0.4}
+pr1 <- draws_zoib %>% 
+  ggplot(aes(x = prop_bet, y = expt_cond)) +
+  #stat_histintervalh(breaks = 40) +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  geom_point(colour = COL_OBSERVED, data = prop_bet_agg, 
+             shape = SHAPE_OBSERVED, fill = COL_FILLED, stroke = 2) +
+  xlab("Proportion Bet") + ylab(ylabel) +
+  scale_x_continuous(labels = scales::percent_format(1))
+pr2 <- draws_zoib_diff %>% 
+  ggplot(aes(x = prop_bet, y = comparison_with)) +
+  #stat_histintervalh(breaks = 40) +
+  geom_vline(xintercept = 0, colour = "darkgrey") +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  geom_point(colour = COL_OBSERVED, data = prop_bet_agg_diff, 
+             shape = SHAPE_OBSERVED, fill = COL_FILLED, stroke = 2) +
+  xlab("Difference in Proportion Bet") + ylab("No-Message vs.") +
+  scale_x_continuous(labels = scales::percent_format(0.1), 
+                     breaks = seq(-0.1, 0.05, by = 0.025))
+
+cowplot::plot_grid(pr1, pr2)
+```
+
 ## Individual ZOIBR Parameters
 
 Mu:
@@ -797,7 +837,46 @@ cowplot::plot_grid(ph2, ph2_diff)
 
 ```
 
-# Hypothesis 3a: Mean Speed Of Play
+Results figure with observed means:
+
+```{r, include=FALSE}
+d_agg <- duse %>% 
+  group_by(expt_cond) %>% 
+  summarise(prob = mean(gamcare_click))
+
+d_agg_diff <- d_agg %>% 
+  compare_levels(prob, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
+```
+
+
+```{r, out.width="100%", fig.width = 8, fig.asp=0.4}
+
+ph2 <- draws_h2 %>% 
+  ggplot(aes(x = prob, y = expt_cond)) +
+  #stat_histintervalh(breaks = 40) +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  geom_point(colour = COL_OBSERVED, data = d_agg, 
+             shape = SHAPE_OBSERVED, fill = COL_FILLED, stroke = 2) +
+  xlab("Probability of GamCare Click") + ylab(ylabel) +
+  scale_x_continuous(labels = scales::percent_format(1))
+ph2_diff <- draws_h2_diff %>% 
+  ggplot(aes(x = prob, y = comparison_with)) +
+  #stat_histintervalh(breaks = 40) +
+  geom_vline(xintercept = 0, colour = "darkgrey") +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  geom_point(colour = COL_OBSERVED, data = d_agg_diff, 
+             shape = SHAPE_OBSERVED, fill = COL_FILLED, stroke = 2) +
+  xlab("Difference in Probability") + ylab("No-Message vs.") +
+  scale_x_continuous(labels = scales::percent_format(0.1))
+
+cowplot::plot_grid(ph2, ph2_diff)
+
+```
+
+
+# Hypothesis 3a: Speed Of Play
 
 ```{r, include=FALSE}
 bets_use <- bets %>% 
@@ -914,7 +993,7 @@ pp1
 
 ```
 
-Our hypothesis is about the mean betting time, which we need to calculate from the model parameters log-mean m and log-SD sigma as mean = exp(m + sigma^2/2).
+Our hypothesis is about the mean betting time, which we need to calculate from the model parameters log-mean m and log-SD sigma as mean = ndt + exp(m + sigma^2/2).
 
 ```{r, include=FALSE}
 draws_times_m <- emmeans(m_slognorm, "expt_cond") %>% 
@@ -961,7 +1040,7 @@ ph3a <- draws_slognorm %>%
   ggplot(aes(x = mean, y = expt_cond)) +
   #stat_histintervalh(breaks = 40) +
   stat_halfeye(.width = ERROR_WIDTH) +
-  xlab("Mean Betting Time (s)") + ylab(ylabel)
+  xlab("Betting Time (s)") + ylab(ylabel)
 ph3a_diff <- draws_times_diff %>% 
   ggplot(aes(x = mean, y = comparison_with)) +
   #stat_histintervalh(breaks = 40) +
@@ -972,6 +1051,45 @@ ph3a_diff <- draws_times_diff %>%
 cowplot::plot_grid(ph3a, ph3a_diff)
 
 ```
+
+
+Results figure with observed means:
+
+```{r, include=FALSE}
+d_agg <- times_use2 %>% 
+  # group_by(expt_cond, ppt_id) %>%
+  # summarise(time = mean(time)) %>% 
+  group_by(expt_cond) %>% 
+  summarise(mean = mean(time))
+
+d_agg_diff <- d_agg %>% 
+  compare_levels(mean, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
+```
+
+```{r, out.width="100%", fig.width = 8, fig.asp=0.4}
+
+ph3a <- draws_slognorm %>% 
+  ggplot(aes(x = mean, y = expt_cond)) +
+  #stat_histintervalh(breaks = 40) +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  geom_point(colour = COL_OBSERVED, data = d_agg, 
+             shape = SHAPE_OBSERVED, fill = COL_FILLED, stroke = 2) +
+  xlab("Betting Time (s)") + ylab(ylabel)
+ph3a_diff <- draws_times_diff %>% 
+  ggplot(aes(x = mean, y = comparison_with)) +
+  #stat_histintervalh(breaks = 40) +
+  geom_vline(xintercept = 0, colour = "darkgrey") +
+  stat_halfeye(.width = ERROR_WIDTH) +
+    geom_point(colour = COL_OBSERVED, data = d_agg_diff, 
+             shape = SHAPE_OBSERVED, fill = COL_FILLED, stroke = 2) +
+  xlab("Difference in Betting Time") + ylab("No-Message vs.") 
+
+cowplot::plot_grid(ph3a, ph3a_diff)
+
+```
+
 
 # Hypothesis 3b: Total Number of Spins
 
@@ -1108,14 +1226,46 @@ Now the results figure:
 pspin1 <- nb_draws %>% 
   ggplot(aes(y = expt_cond, x = trunc_mean)) +
   stat_halfeye(.width = ERROR_WIDTH) +
-  ylab(ylabel) + xlab("Mean number of spins")
+  ylab(ylabel) + xlab("Number of Spins")
 pspin2 <- draws_number_diff %>% 
   ggplot(aes(x = trunc_mean, y = comparison_with)) +
   geom_vline(xintercept = 0, color = "grey", size = 0.6) +
   stat_halfeye(.width = ERROR_WIDTH) +
-  labs(x = "Difference in mean number of spins") + ylab("No-Message vs.") 
+  labs(x = "Difference in Number of Spins") + ylab("No-Message vs.") 
 cowplot::plot_grid(pspin1, pspin2)
 ```
+
+Results figure with observed means:
+
+```{r, include=FALSE}
+d_agg <- part_nozero %>% 
+  group_by(expt_cond) %>% 
+  summarise(trunc_mean = mean(bet_count))
+
+d_agg_diff <- d_agg %>% 
+  compare_levels(trunc_mean, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No-Message"))
+```
+
+
+```{r, out.width="100%", fig.width = 8, fig.asp=0.4}
+pspin1 <- nb_draws %>% 
+  ggplot(aes(y = expt_cond, x = trunc_mean)) +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  geom_point(colour = COL_OBSERVED, data = d_agg, 
+             shape = SHAPE_OBSERVED, fill = COL_FILLED, stroke = 2) +
+  ylab(ylabel) + xlab("Number of Spins")
+pspin2 <- draws_number_diff %>% 
+  ggplot(aes(x = trunc_mean, y = comparison_with)) +
+  geom_vline(xintercept = 0, color = "grey", size = 0.6) +
+  stat_halfeye(.width = ERROR_WIDTH) +
+  geom_point(colour = COL_OBSERVED, data = d_agg_diff, 
+             shape = SHAPE_OBSERVED, fill = COL_FILLED, stroke = 2) +
+  labs(x = "Difference in Number of Spins") + ylab("No-Message vs.") 
+cowplot::plot_grid(pspin1, pspin2)
+```
+
 
 
 # System
