@@ -935,6 +935,103 @@ cowplot::plot_grid(ph3a, ph3a_diff)
 
 ```
 
+## Model Including all Observations
+
+The omitted betting times larger than 120 seconds are not completely equally distributed across conditions:
+
+```{r}
+times_use %>% 
+  filter(time >= 120) %>% 
+  count(expt_cond)
+```
+
+Even though the number of such observations is very low and they are almost equally distributed across conditions, we can rerun the model including all observations.
+
+But first, we can take a look at some descriptive statistics of the distribution including all observations:
+
+```{r}
+times_use %>% 
+  summarise(across(time, 
+                   .fns = list(mean = mean, median = median, sd = sd)))
+
+times_use %>% 
+  group_by(expt_cond) %>% 
+  summarise(across(time, 
+                   .fns = list(mean = mean, median = median, sd = sd)))
+```
+
+
+```{r, include=FALSE}
+
+tmp_model_filename <- "model_fits/model_slognormal_v2.rda"
+if (file.exists(tmp_model_filename)) {
+  load(tmp_model_filename)
+} else {
+  m_slognorm2 <- brm(bf(time ~ expt_cond + (1|ppt_id), 
+                       sigma ~ expt_cond), 
+                    data = times_use, 
+                    family = shifted_lognormal(),
+                    iter = 6000, warmup = 1000, chains = 10, 
+                    thin = 3  ## to reduce model size on disk
+  ) 
+  save(m_slognorm2, file = tmp_model_filename, compress = "xz")
+}
+
+
+```
+
+The model also shows no obvious convergence problems:
+
+```{r, fig.asp=2.0}
+plot(m_slognorm2, 
+     variable = get_variables(m_slognorm2)[c(1, 2, 3, 4, 5, 6, 7, 8)], 
+     N = 8)
+```
+
+The model is also able to adequately reproduce the shape of the observed data.
+
+```{r, fig.width=6, out.width="100%"}
+pp1 <- pp_check(m_slognorm2, type = "hist", binwidth = 1, ndraws = 11) +
+  theme(legend.position = "none") +
+  coord_cartesian(xlim = c(0, 120), ylim = c(0, 1700))
+pp1
+
+```
+
+
+```{r, include=FALSE}
+draws_times_m <- emmeans(m_slognorm2, "expt_cond") %>% 
+  gather_emmeans_draws() %>% 
+  rename(m = .value)
+draws_times_s <- emmeans(m_slognorm2, "expt_cond", dpar = "sigma") %>% 
+  gather_emmeans_draws() %>% 
+  mutate(.value = exp(.value)) %>% 
+  rename(sigma = .value)
+draws_slognorm <- left_join(draws_times_m, draws_times_s) %>% 
+  mutate(mean = exp(m + sigma^2/2))
+draws_times_diff <- draws_slognorm %>% 
+  compare_levels(mean, by = expt_cond) %>% 
+  filter(expt_cond != COMPARISON_EXCLUDE) %>% 
+  mutate(comparison_with = str_remove(expt_cond, " - No Message"))
+
+```
+
+The following table shows the predicted mean betting times which are similar to the observed ones and reproduce the ordering of conditions means and is very similar to the model with excluded observations:
+
+```{r}
+draws_slognorm %>% 
+  mean_qi(mean)
+```
+
+We can also take a look at the differences from the no message condition:
+
+```{r}
+draws_times_diff %>% 
+  mean_qi(mean) 
+
+```
+
+
 # Hypothesis 3b: Total Number of Spins
 
 The following histograms shows the distribution of the number of spins.
