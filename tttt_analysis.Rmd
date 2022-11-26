@@ -173,8 +173,17 @@ Now let's take a look at the PGSI scores:
 duse %>% 
   summarise(across(pgsi, .fns = c(mean = mean, sd = sd)))
 duse %>% 
-  group_by(expt_cond) %>% 
-  summarise(across(pgsi, .fns = c(mean = mean, sd = sd)))
+  select(pgsi) %>% 
+  as.data.frame() %>% 
+  psych::describe()
+# duse %>% 
+#   group_by(expt_cond) %>% 
+#   summarise(across(pgsi, .fns = c(mean = mean, sd = sd)))
+duse %>% 
+  select(pgsi, expt_cond) %>% 
+  as.data.frame() %>% 
+  psych::describeBy(group = "expt_cond")
+
 ```
 
 Of the total of `r nrow(duse)` participants, `r sum(duse$bet_count == 0)` participants did not bet at all. We can take a look at the bonus as a function of whether or not participant bet:
