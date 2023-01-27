@@ -529,7 +529,8 @@ cowplot::plot_grid(pr1, pr2)
 
 ggsave(plot = cowplot::plot_grid(pr1, pr2), 
        filename = "figures/res_prop_bet.png", width = 8, height = 8*0.4, dpi = 500)
-
+ggsave(plot = cowplot::plot_grid(pr1, pr2), 
+       filename = "figures/res_prop_bet.pdf", width = 8, height = 8*0.4)
 # pr1 + theme_bw(base_size = 17)
 # ggsave(pr1  + theme_bw(base_size = 17), filename = "figures/res_e1a.png", 
 #        width = 9.5, height = 4.5)
@@ -843,7 +844,8 @@ ph2_diff <- draws_h2_diff %>%
   scale_x_continuous(labels = scales::percent_format(0.1))
 
 cowplot::plot_grid(ph2, ph2_diff)
-
+ggsave(plot = cowplot::plot_grid(ph2, ph2_diff), 
+       filename = "figures/res_bernoulli.pdf", width = 8, height = 8*0.4)
 ```
 
 Results figure with observed means:
@@ -1058,6 +1060,8 @@ ph3a_diff <- draws_times_diff %>%
   xlab("Difference in Betting Time") + ylab("No-Message vs.") 
 
 cowplot::plot_grid(ph3a, ph3a_diff)
+ggsave(plot = cowplot::plot_grid(ph3a, ph3a_diff), 
+       filename = "figures/res_lognormal.pdf", width = 8, height = 8*0.4)
 
 ```
 
@@ -1339,6 +1343,8 @@ pspin2 <- draws_number_diff %>%
   stat_halfeye(.width = ERROR_WIDTH) +
   labs(x = "Difference in Number of Spins") + ylab("No-Message vs.") 
 cowplot::plot_grid(pspin1, pspin2)
+ggsave(plot = cowplot::plot_grid(pspin1, pspin2), 
+       filename = "figures/res_negbinomial.pdf", width = 8, height = 8*0.4)
 ```
 
 Results figure with observed means:
